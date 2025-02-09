@@ -22,10 +22,10 @@ class GitHubSearchTool(Tool):
         url = "https://api.github.com/search/code"
 
         headers = {
-            "Authorization": f"Bearer {self.github_api_token}",  # Replace with your token
+            "Authorization": f"Bearer {self.github_api_token}",
         }
 
-        params = {"q": query}  # Number of results per page
+        params = {"q": query}
 
         response = requests.get(url, headers=headers, params=params)
 
