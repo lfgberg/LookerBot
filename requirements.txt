@@ -1,0 +1,4 @@
+smolagents
+accelerate
+litellm
+python-dotenv
