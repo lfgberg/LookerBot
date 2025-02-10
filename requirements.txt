@@ -2,3 +2,4 @@ smolagents
 accelerate
 litellm
 python-dotenv
+markdownify
