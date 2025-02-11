@@ -3,3 +3,5 @@ accelerate
 litellm
 python-dotenv
 markdownify
+re
+requests

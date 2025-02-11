@@ -1,6 +1,7 @@
 import os
 import markdownify
 import requests
+import re
 from dotenv import load_dotenv
 from smolagents import CodeAgent, HfApiModel, DuckDuckGoSearchTool, Tool
 
