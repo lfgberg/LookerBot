@@ -5,3 +5,7 @@ python-dotenv
 markdownify
 re
 requests
+argparse
+pathlib
+pydantic
+pyyaml

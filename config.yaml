@@ -1,0 +1,9 @@
+---
+hugging_face:
+  model_id: deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+lite_llm:
+  model_id: ollama_chat/mistral
+  api_base: http://localhost:11434
+open_ai:
+  model_id: deepseek-r1-distill-llama-8b
+  api_base: http://127.0.0.1:1234/v1/

@@ -1,8 +1,10 @@
-import os
 import markdownify
+from dotenv import load_dotenv
 import requests
 import re
-from dotenv import load_dotenv
+import os
+from typing import Union
+from config import Config, Secrets, load_config, parse_arguments
 from smolagents import (
     CodeAgent,
     HfApiModel,
@@ -23,7 +25,7 @@ class VisitWebsiteTool(Tool):
     }
     output_type = "string"
 
-    def forward(self, url: str):
+    def forward(self, url: str) -> str:
         try:
             # Send a GET request to the URL
             response = requests.get(url)
@@ -66,11 +68,11 @@ class GitHubSearchTool(Tool):
     output_type = "string"
 
     # Queries GitHub w/API Key
-    def query_github(self, query: str):
+    def query_github(self, query: str) -> requests.Response:
         url = "https://api.github.com/search/code"
 
         headers = {
-            "Authorization": f"Bearer {github_api_token}",
+            "Authorization": f"Bearer {secrets.github}",
         }
 
         params = {"q": query, "per_page": 100}
@@ -81,7 +83,7 @@ class GitHubSearchTool(Tool):
         return response
 
     # Parses results
-    def parse_response(self, response: requests.Response):
+    def parse_response(self, response: requests.Response) -> dict:
         results = response.json()
         output = {}
 
@@ -94,7 +96,7 @@ class GitHubSearchTool(Tool):
         return output
 
     # The inference code to be executed
-    def forward(self, query: str):
+    def forward(self, query: str) -> dict:
 
         try:
             response = self.query_github(query)
@@ -105,37 +107,50 @@ class GitHubSearchTool(Tool):
         return results
 
 
+def load_model(
+    mode: str, config: Config
+) -> Union[OpenAIServerModel, HfApiModel, LiteLLMModel]:
+    mode = mode.lower()
+
+    match mode:
+        case "hf":
+            model = HfApiModel(
+                model_id=config.hugging_face.model_id, token=secrets.huggingface
+            )
+        case "openai":
+            model = OpenAIServerModel(
+                model_id=config.open_ai.model_id,
+                api_base=config.open_ai.api_base,
+                api_key=secrets.openai,
+            )
+        case "litellm":
+            model = LiteLLMModel(
+                model_id=config.lite_llm.model_id,
+                api_base=config.lite_llm.api_base,
+            )
+        case _:
+            raise ValueError(f"Error: {mode} is not a valid mode.")
+
+    return model
+
+
 def main():
-    # Pull in API keys from .env
+    # Setup
+    args = parse_arguments()
+    config = Config(**load_config(args.config))
+
+    # Secrets
+    global secrets
     load_dotenv()
+    secrets = Secrets(
+        github=os.getenv("GITHUB_API_KEY"),
+        openai=os.getenv("OPENAI_API_KEY"),
+        huggingface=os.getenv("HF_API_KEY"),
+    )
 
-    global hf_api_token
-    global github_api_token
-    # global grok_api_token
+    model = load_model(args.mode, config)
 
-    target = "Penn State"
-
-    hf_api_token = os.getenv("HF_API_TOKEN")
-    github_api_token = os.getenv("GITHUB_API_TOKEN")
-    # grok_api_token = os.getenv("GROK_API_TOKEN")
-
-    # Using a local instace on ollama
-    # model = LiteLLMModel(
-    #    model_id="ollama_chat/mistral",
-    #    api_base="http://localhost:11434",
-    # )
-
-    # Using HF API
-    model_id = "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
-    model = HfApiModel(model_id=model_id, token=hf_api_token)
-
-    # Using OpenAI Compatible Server ex LMStudio
-    # model = OpenAIServerModel(
-    #    model_id="deepseek-r1-distill-llama-8b",
-    #    api_base="http://127.0.0.1:1234/v1/",
-    #    api_key="lm-studio",
-    # )
-
+    # Currently not using these managed agents because they were overcomplicating things and reducing performance
     # Web Search Agent
     # managed_web_agent = CodeAgent(
     #    model=model,
@@ -162,14 +177,14 @@ def main():
 
     agent.run(
         f"""
-        You're a helpful OSINT and cybersecurity expert named Looker. You're employed by {target} to audit their operational security.
+        You're a helpful OSINT and cybersecurity expert named Looker. You're employed by {args.target} to audit their operational security.
         Your job is to perform open source intelligence on companies to identify potential security vulnerabilities. Identifying and reporting these vulnerabilities is extremely important as it will help maximize profit, and prevent security breaches.
         You must use all your available resources to complete your task and maximize profit.
 
         ---
         Task:
-        Search GitHub to find sensitive files on GitHub belonging to {target}. You should search for common configuration files, database files, API keys, credentials, and other similar content.
-        You should search based off of keywords related to {target}, this should include the name of the target as well as key domain names. If you don't know the domain name for an organization, use your tools to look it up. Do not hallucinate keywords or domain names.
+        Search GitHub to find sensitive files on GitHub belonging to {args.target}. You should search for common configuration files, database files, API keys, credentials, and other similar content.
+        You should search based off of keywords related to {args.target}, this should include the name of the target as well as key domain names. If you don't know the domain name for an organization, use your tools to look it up. Do not hallucinate keywords or domain names.
         Do not use the organization keyword when using the GitHub search, instead search using additional keywords.
         Do not simulate or hallucinate any example or fake results.
         ---
@@ -179,7 +194,7 @@ def main():
 
         ```py
         # Search GitHub for exposed WordPress Config files
-        github_search(query="filename:wp-config.php AND {target}")
+        github_search(query="filename:wp-config.php AND {args.target}")
 
         # View the content of a website
         visit_website(url="https://example.com")
