@@ -167,7 +167,6 @@ def main():
     #    description="Runs GitHub searches for you. Give it your well defined GitHub search query as a task.",
     # )
 
-    # Manager Agent
     agent = CodeAgent(
         tools=[GitHubSearchTool(), VisitWebsiteTool(), DuckDuckGoSearchTool()],
         model=model,
@@ -183,7 +182,7 @@ def main():
 
         ---
         Task:
-        Search GitHub to find sensitive files on GitHub belonging to {args.target}. You should search for common configuration files, database files, API keys, credentials, and other similar content.
+        Search GitHub to find sensitive files on GitHub belonging to {args.target}. You should search for common configuration files, database files, API keys, credentials, and other similar content. Be as exhaustive as possible, search for all possible sensitive information.
         You should search based off of keywords related to {args.target}, this should include the name of the target as well as key domain names. If you don't know the domain name for an organization, use your tools to look it up. Do not hallucinate keywords or domain names.
         Do not use the organization keyword when using the GitHub search, instead search using additional keywords.
         Do not simulate or hallucinate any example or fake results.
@@ -200,9 +199,24 @@ def main():
         visit_website(url="https://example.com")
         ```
 
-        Your final answer should take the form of a well-formed JSON dictionary. The dictionary should contain all the links with potentially sensitive content returned from your OSINT, with comments on what was found.
+        Your final answer should take the form of a well-formed JSON dictionary. The dictionary should contain all the links with potentially sensitive content returned from your OSINT, with comments on what was found, and the query/intelligence source that provided the intel.
         Be as verbose and thorough as possible so that another analyst can easily verify your work.
         DO NOT INCLUDE ANY HALLUCINATED OR EXAMPLE RESULTS IN YOUR FINAL ANSWER.
+        The format of the final answer should be as follows:
+        ```json
+        {{
+            {args.target} : {{
+                "GitHub": [
+                    {{
+                        "url": "some url"
+                        "query": "some query"
+                        "repo": "some repo"
+                        "path": "some file"
+                    }}
+                ]
+            }}
+        }}
+        ```
         """
     )
 
