@@ -174,6 +174,11 @@ def main():
         additional_authorized_imports=["json"],
     )
 
+    additional_info = ""
+
+    if args.keywords or args.domains:
+        additional_info
+
     agent.run(
         f"""
         You're a helpful OSINT and cybersecurity expert named Looker. You're employed by {args.target} to audit their operational security.
@@ -182,21 +187,24 @@ def main():
 
         ---
         Task:
-        Search GitHub to find sensitive files on GitHub belonging to {args.target}. You should search for common configuration files, database files, API keys, credentials, and other similar content. Be as exhaustive as possible, search for all possible sensitive information.
+        Find sensitive files belonging to {args.target} by performing GitHub and DuckDuckGo dorks. You should search for common configuration files, database files, API keys, credentials, and other similar content. Be as exhaustive as possible, search for all possible sensitive information.
         You should search based off of keywords related to {args.target}, this should include the name of the target as well as key domain names. If you don't know the domain name for an organization, use your tools to look it up. Do not hallucinate keywords or domain names.
         Do not use the organization keyword when using the GitHub search, instead search using additional keywords.
         Do not simulate or hallucinate any example or fake results.
         ---
-
+        {additional_info}
         You must use your tools to perform this task.
         You can call your tools like this:
 
         ```py
         # Search GitHub for exposed WordPress Config files
-        github_search(query="filename:wp-config.php AND {args.target}")
+        result = github_search(query="filename:wp-config.php AND {args.target}")
 
         # View the content of a website
-        visit_website(url="https://example.com")
+        result1 = visit_website(url="https://example.com")
+
+        # Search DuckDuckGo for pdf files on psu.edu
+        result2 = web_search(query="filetype:pdf site:psu.edu")
         ```
 
         Your final answer should take the form of a well-formed JSON dictionary. The dictionary should contain all the links with potentially sensitive content returned from your OSINT, with comments on what was found, and the query/intelligence source that provided the intel.
@@ -212,6 +220,12 @@ def main():
                         "query": "some query"
                         "repo": "some repo"
                         "path": "some file"
+                    }}
+                ],
+                "DuckDuckGo" : [
+                    {{
+                        "url": "some url"
+                        "query": "some query"
                     }}
                 ]
             }}
