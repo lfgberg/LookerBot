@@ -177,9 +177,21 @@ def main():
     additional_info = ""
 
     if args.keywords or args.domains:
-        additional_info
+        context = ""
+        if args.domains:
+            context += f"The known domains for {args.target} are {args.domains}.\n"
+        if args.keywords:
+            context += f"Some additional search keywords for {args.target} are {args.keywords}.\n"
 
-    agent.run(
+        additional_info = f"""
+        ---
+        Additional Context:
+        {context}
+        You must search for each of these domains/keywords as you do your OSINT collection. Use each individual domain and keyword to search across all intelligence sources.
+        ---
+        """
+
+    intel = agent.run(
         f"""
         You're a helpful OSINT and cybersecurity expert named Looker. You're employed by {args.target} to audit their operational security.
         Your job is to perform open source intelligence on companies to identify potential security vulnerabilities. Identifying and reporting these vulnerabilities is extremely important as it will help maximize profit, and prevent security breaches.
@@ -188,50 +200,59 @@ def main():
         ---
         Task:
         Find sensitive files belonging to {args.target} by performing GitHub and DuckDuckGo dorks. You should search for common configuration files, database files, API keys, credentials, and other similar content. Be as exhaustive as possible, search for all possible sensitive information.
-        You should search based off of keywords related to {args.target}, this should include the name of the target as well as key domain names. If you don't know the domain name for an organization, use your tools to look it up. Do not hallucinate keywords or domain names.
+        You should search based off of keywords related to {args.target}, this should include the name of the target as well as key domain names. If you don't know the domain name for an organization, use your tools to look it up. If you are provided additional context with keywords or domain names you do not need to look them up. Do not hallucinate keywords or domain names.
         Do not use the organization keyword when using the GitHub search, instead search using additional keywords.
         Do not simulate or hallucinate any example or fake results.
         ---
         {additional_info}
         You must use your tools to perform this task.
-        You can call your tools like this:
+        You can call your tools and generate a report like this:
 
         ```py
-        # Search GitHub for exposed WordPress Config files
+        # Search GitHub for exposed WordPress Config files - uses the GitHub search syntax
         result = github_search(query="filename:wp-config.php AND {args.target}")
 
         # View the content of a website
         result1 = visit_website(url="https://example.com")
 
-        # Search DuckDuckGo for pdf files on psu.edu
+        # Search DuckDuckGo for pdf files on psu.edu - uses the DuckDuckGo search syntax
         result2 = web_search(query="filetype:pdf site:psu.edu")
+
+        # Aggregate the results into a report
+        report = {{                                                                                                                                                                                                                
+            "Penn State": {{                                                                                                                                                                                                       
+                "GitHub": [],                                                                                                                                                                                                                
+                "DuckDuckGo": []                                                                                                                                                                                                                 
+            }}                                                                                                                                                                                                                     
+        }} 
+
+        report["Penn State"]["GitHub"].append(result)
+
+        final_answer(report)
         ```
 
         Your final answer should take the form of a well-formed JSON dictionary. The dictionary should contain all the links with potentially sensitive content returned from your OSINT, with comments on what was found, and the query/intelligence source that provided the intel.
         Be as verbose and thorough as possible so that another analyst can easily verify your work.
         DO NOT INCLUDE ANY HALLUCINATED OR EXAMPLE RESULTS IN YOUR FINAL ANSWER.
-        The format of the final answer should be as follows:
-        ```json
-        {{
-            {args.target} : {{
-                "GitHub": [
-                    {{
-                        "url": "some url"
-                        "query": "some query"
-                        "repo": "some repo"
-                        "path": "some file"
-                    }}
-                ],
-                "DuckDuckGo" : [
-                    {{
-                        "url": "some url"
-                        "query": "some query"
-                    }}
-                ]
-            }}
-        }}
-        ```
+        Do not just print out your results - you need to return them in your final answer as part of a JSON dictionary.
+        Ensure you are wrapping tool use in try catch blocks to handle exceptions.
         """
+    )
+
+    agent.run(
+        f"""
+You're a helpful OSINT and cybersecurity expert named Looker. You're employed by {args.target} to audit their operational security.
+Another analyst on your team has aggregated a JSON dictionary containing potential sensitive information on {args.target} found through OSINT.
+
+Your job is to use your visit_website tool to view the contents of each entry, and determine if you believe it is actually potentially sensitive information relating to {args.target}.
+
+Here is the report from your coworker:
+```json
+{intel}
+```
+
+Remove any elements from the report that you don't think are legitamite, and return this audited report as your final answer.
+"""
     )
 
 
