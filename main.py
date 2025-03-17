@@ -150,23 +150,6 @@ def main():
 
     model = load_model(args.mode, config)
 
-    # Currently not using these managed agents because they were overcomplicating things and reducing performance
-    # Web Search Agent
-    # managed_web_agent = CodeAgent(
-    #    model=model,
-    #    tools=[DuckDuckGoSearchTool()],
-    #    name="web_search",
-    #    description="Runs web searches for you. Give it your query as a task.",
-    # )
-
-    # GitHub Search Agent
-    # managed_github_agent = CodeAgent(
-    #    model=model,
-    #    tools=[GitHubSearchTool(), VisitWebsiteTool()],
-    #    name="github_search",
-    #    description="Runs GitHub searches for you. Give it your well defined GitHub search query as a task.",
-    # )
-
     agent = CodeAgent(
         tools=[GitHubSearchTool(), VisitWebsiteTool(), DuckDuckGoSearchTool()],
         model=model,
