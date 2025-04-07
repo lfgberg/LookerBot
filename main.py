@@ -2,7 +2,10 @@ import markdownify
 from dotenv import load_dotenv
 import requests
 import re
+import json
 import os
+import subprocess
+from tqdm import tqdm
 from typing import Union
 from config import Config, Secrets, load_config, parse_arguments
 from smolagents import (
@@ -63,13 +66,17 @@ class GitHubSearchTool(Tool):
         "query": {
             "type": "string",
             "description": "The search query to submit to github (A dork such as 'filename:wp-config.php')",
-        }
+        },
+        "mode": {
+            "type": "string",
+            "description": "The mode to search in, must be one of ['code','repositories']",
+        },
     }
     output_type = "string"
 
     # Queries GitHub w/API Key
-    def query_github(self, query: str) -> requests.Response:
-        url = "https://api.github.com/search/code"
+    def query_github(self, query: str, mode: str) -> requests.Response:
+        url = f"https://api.github.com/search/{mode}"
 
         headers = {
             "Authorization": f"Bearer {secrets.github}",
@@ -83,24 +90,37 @@ class GitHubSearchTool(Tool):
         return response
 
     # Parses results
-    def parse_response(self, response: requests.Response) -> dict:
+    def parse_response(self, response: requests.Response, mode: str) -> dict:
         results = response.json()
-        output = {}
+        output = None
 
-        for item in results["items"]:
-            output[item["repository"]["full_name"]] = {
-                "path": item["path"],
-                "url": item["html_url"],
-            }
+        if mode.lower() == "repositories":
+            output = []
+            for item in results["items"]:
+                output.append(item["html_url"])
+        else:
+            output = {}
+            for item in results["items"]:
+                output[item["repository"]["full_name"]] = {
+                    "path": item["path"],
+                    "url": item["html_url"],
+                }
 
         return output
 
     # The inference code to be executed
-    def forward(self, query: str) -> dict:
+    def forward(self, query: str, mode: str):
+
+        modes = ["code", "repositories"]
+
+        if mode.lower() not in modes:
+            raise ValueError(
+                f"Error: mode '{mode}' is not a valid mode. Must be one of {modes}"
+            )
 
         try:
-            response = self.query_github(query)
-            results = self.parse_response(response)
+            response = self.query_github(query, mode)
+            results = self.parse_response(response, mode)
         except requests.RequestException as e:
             return f"Error fetching the webpage: {str(e)}"
 
@@ -132,6 +152,69 @@ def load_model(
             raise ValueError(f"Error: {mode} is not a valid mode.")
 
     return model
+
+
+def scan_repo_with_trufflehog(url: str) -> list[str]:
+    # Run the command and capture the output
+    result = subprocess.run(
+        [
+            "trufflehog.exe",
+            "--json",
+            "--results=verified,unknown",
+            "--no-update",
+            "git",
+            url,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    if result.returncode != 0:
+        print("Error running TruffleHog:", result.stderr)
+        return []
+
+    # Parse each line of JSON output
+    findings = []
+
+    for line in result.stdout.strip().split("\n"):
+        if line:
+            try:
+                findings.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                print("Failed to parse line:", line)
+
+    return findings
+
+
+def scan_repos(repos: list[str]) -> dict:
+    result = {}
+
+    for repo in tqdm(repos, desc="Scanning Repos"):
+        findings = scan_repo_with_trufflehog(repo)
+
+        if findings:
+            result[repo] = {"findings": findings}
+        else:
+            result[repo] = {}
+
+    return result
+
+
+def save_report(data: dict, filename: str) -> None:
+    """
+    Saves a dictionary to a JSON file.
+
+    Args:
+        data (dict): The dictionary to save.
+        filename (str): The path to the JSON file.
+    """
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        print(f"Dictionary saved to {filename}")
+    except Exception as e:
+        print(f"Error saving dictionary to JSON: {e}")
 
 
 def main():
@@ -174,69 +257,45 @@ def main():
         ---
         """
 
-    intel = agent.run(
+    # Collect repositories owned by the org
+    repos = agent.run(
         f"""
         You're a helpful OSINT and cybersecurity expert named Looker. You're employed by {args.target} to audit their operational security.
         Your job is to perform open source intelligence on companies to identify potential security vulnerabilities. Identifying and reporting these vulnerabilities is extremely important as it will help maximize profit, and prevent security breaches.
         You must use all your available resources to complete your task and maximize profit.
-
         ---
         Task:
-        Find sensitive files belonging to {args.target} by performing GitHub and DuckDuckGo dorks. You should search for common configuration files, database files, API keys, credentials, and other similar content. Be as exhaustive as possible, search for all possible sensitive information.
-        You should search based off of keywords related to {args.target}, this should include the name of the target as well as key domain names. If you don't know the domain name for an organization, use your tools to look it up. If you are provided additional context with keywords or domain names you do not need to look them up. Do not hallucinate keywords or domain names.
-        Do not use the organization keyword when using the GitHub search, instead search using additional keywords.
+        Find GitHub repositories belonging to {args.target} by performing GitHub dorks/searches.
+        You should search based off of keywords related to {args.target}, this should include the name of the target as well as key domain names. If you don't know the domain name for an organization, use your tools to look it up. If you are provided additional context with keywords or domain names you must use them. Do not hallucinate keywords or domain names.
+        Be as comprehensive as possible, you should get creative by using additional keywords to find repositories that could be owned by {args.target}. We want to make sure all search queries are tailored to {args.target}, so don't perform any generic searches for things such as "healthcare".
         Do not simulate or hallucinate any example or fake results.
         ---
         {additional_info}
         You must use your tools to perform this task.
-        You can call your tools and generate a report like this:
+        You can call your tools and generate a final result like this:
 
         ```py
-        # Search GitHub for exposed WordPress Config files - uses the GitHub search syntax
-        result = github_search(query="filename:wp-config.php AND {args.target}")
+        # Search GitHub for repositories belonging to the target
+        result1 = github_search(query="{args.target}", mode="repositories")
+        # Search GitHub for repositories with psu.edu
+        result2 = github_search(query="psu.edu", mode="repositories")
 
-        # View the content of a website
-        result1 = visit_website(url="https://example.com")
+        # Aggregate the results into a report - you must use this format
+        results = []
 
-        # Search DuckDuckGo for pdf files on psu.edu - uses the DuckDuckGo search syntax
-        result2 = web_search(query="filetype:pdf site:psu.edu")
+        results.extend(result1)
+        results.extend(result2)
 
-        # Aggregate the results into a report
-        report = {{                                                                                                                                                                                                                
-            "Penn State": {{                                                                                                                                                                                                       
-                "GitHub": [],                                                                                                                                                                                                                
-                "DuckDuckGo": []                                                                                                                                                                                                                 
-            }}                                                                                                                                                                                                                     
-        }} 
-
-        report["Penn State"]["GitHub"].append(result)
-
-        final_answer(report)
+        final_answer(results)
         ```
 
-        Your final answer should take the form of a well-formed JSON dictionary. The dictionary should contain all the links with potentially sensitive content returned from your OSINT, with comments on what was found, and the query/intelligence source that provided the intel.
-        Be as verbose and thorough as possible so that another analyst can easily verify your work.
-        DO NOT INCLUDE ANY HALLUCINATED OR EXAMPLE RESULTS IN YOUR FINAL ANSWER.
-        Do not just print out your results - you need to return them in your final answer as part of a JSON dictionary.
-        Ensure you are wrapping tool use in try catch blocks to handle exceptions.
+        This is just an example - you should be much more extensive with your searches to ensure we find all possible repositories owned by {args.target}.
         """
     )
 
-    agent.run(
-        f"""
-You're a helpful OSINT and cybersecurity expert named Looker. You're employed by {args.target} to audit their operational security.
-Another analyst on your team has aggregated a JSON dictionary containing potential sensitive information on {args.target} found through OSINT.
-
-Your job is to use your visit_website tool to view the contents of each entry, and determine if you believe it is actually potentially sensitive information relating to {args.target}.
-
-Here is the report from your coworker:
-```json
-{intel}
-```
-
-Remove any elements from the report that you don't think are legitamite, and return this audited report as your final answer.
-"""
-    )
+    # Run trufflehog on each one to find secrets - this uses less compute and is a better tool than using the LLMs
+    github_findings = scan_repos(repos)
+    save_report(github_findings, "output.json")
 
 
 if __name__ == "__main__":

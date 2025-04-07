@@ -5,5 +5,5 @@ lite_llm:
   model_id: ollama_chat/mistral
   api_base: http://localhost:11434
 open_ai:
-  model_id: deepseek-r1-distill-llama-8b
-  api_base: http://127.0.0.1:1234/v1/
+  model_id: gpt-4o-mini
+  api_base: https://api.openai.com/v1/
