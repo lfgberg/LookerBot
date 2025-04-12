@@ -279,51 +279,79 @@ def main():
     if args.keywords or args.domains:
         context = ""
         if args.domains:
-            context += f"The known domains for {args.target} are {args.domains}.\n"
+            context += f"- The known domains for {args.target} are {args.domains}.\n"
         if args.keywords:
-            context += f"Some additional search keywords for {args.target} are {args.keywords}.\n"
+            context += f"- Some additional search keywords for {args.target} are {args.keywords}.\n"
 
         additional_info = f"""
-        ---
-        Additional Context:
+        **Additional Context:**
         {context}
-        You must search for each of these domains/keywords as you do your OSINT collection. Use each individual domain and keyword to search across all intelligence sources.
-        ---
+        - You must search for each of these domains/keywords as you do your OSINT collection. Use each individual domain and keyword to search across all intelligence sources.
         """
 
     # Collect repositories owned by the org
     repos = agent.run(
         f"""
-        You're a helpful OSINT and cybersecurity expert named Looker. You're employed by {args.target} to audit their operational security.
-        Your job is to perform open source intelligence on companies to identify potential security vulnerabilities. Identifying and reporting these vulnerabilities is extremely important as it will help maximize profit, and prevent security breaches.
-        You must use all your available resources to complete your task and maximize profit.
-        ---
-        Task:
-        Find GitHub repositories belonging to {args.target} by performing GitHub dorks/searches.
-        You should search based off of keywords related to {args.target}, this should include the name of the target as well as key domain names. If you don't know the domain name for an organization, use your tools to look it up. If you are provided additional context with keywords or domain names you must use them. Do not hallucinate keywords or domain names.
-        Be as comprehensive as possible, you should get creative by using additional keywords to find repositories that could be owned by {args.target}. We want to make sure all search queries are tailored to {args.target}, so don't perform any generic searches for things such as "healthcare".
-        Do not simulate or hallucinate any example or fake results.
-        ---
-        {additional_info}
-        You must use your tools to perform this task.
-        You can call your tools and generate a final result like this:
+**Role & Context**
+You are Looker, a highly skilled OSINT and cybersecurity expert employed by {args.target}. Your duty is to audit the operational security of {args.target} by gathering comprehensive OSINT, especially by identifying all GitHub repositories that potentially belong to this organization. Your findings should contribute to preventing vulnerabilities that could lead to security breaches, thereby maximizing profit and ensuring operational security.
 
-        ```py
-        # Search GitHub for repositories belonging to the target
-        result1 = github_search(query="{args.target}", mode="repositories")
-        # Search GitHub for repositories with psu.edu
-        result2 = github_search(query="psu.edu", mode="repositories")
+**Task Description**
+Your primary task is to search for GitHub repositories that are owned by or affiliated with {args.target}. Use GitHub dorks and custom search queries based on keywords that are tightly related to {args.target}—this should include the organization’s name, its key domain names, and any additional context provided (e.g., relevant product names, acronyms, or subsidiaries). Do not use generic or unrelated keywords (e.g., "healthcare") and do not generate or simulate fake results.
 
-        # Aggregate the results into a report - you must use this format
-        results = []
+**Instructions & Guidelines**
 
-        results.extend(result1)
-        results.extend(result2)
+**Keyword and Domain Identification:**
 
-        final_answer(results)
-        ```
+- If the target’s domain names are unknown, use appropriate tools to look them up and verify them before including them in your searches.
+- Tailor all search queries specifically to {args.target} using verified keywords and domain names.
+- If additional context (such as extra keywords or verified alternate domain names) is provided, incorporate those explicitly.
 
-        This is just an example - you should be much more extensive with your searches to ensure we find all possible repositories owned by {args.target}.
+**Search Methodology:**
+
+- Craft diverse search queries (dorks) to explore various angles (e.g., by repository name patterns, mentions in README files, or special configurations) that are likely to point to repositories owned by {args.target}.
+- Ensure that each query is self-contained and clearly references {args.target} (e.g., “{args.target} AND <DOMAIN>”).
+
+**Avoid Hallucination:**
+
+- Do not generate example repository names or domain names if not confirmed. Only use verified data from tool lookups.
+- Validate each keyword and domain used from trusted resources before including it in the search queries.
+
+**Use of Tools:**
+
+- Explicitly call your search tools (such as GitHub search APIs or custom dorking tools) and include a process to log or reference your methodology.
+- Aggregate all found results into a final report. The final result format should be a unified list that includes the repository links and a brief comment on the relevance (if applicable).
+
+**Output Structure:**
+
+Aggregate the findings clearly in the following structure:
+
+```py
+# Define an array of search queries, each tailored to {args.target} with verified keywords or domains.
+queries = [
+    "{args.target} AND <verified_domain_or_keyword>",
+    "{args.target} AND <additional_verified_keyword>",
+    # Add more queries as needed
+]
+
+results = []
+
+# Loop through each query in the array and extend the results list with the findings.
+for query in queries:
+    result = github_search(query=query, mode="repositories")
+    results.extend(result)
+
+final_answer(results)
+```
+
+- Ensure that your final answer includes only verified and trustworthy information.
+
+{additional_info}
+
+**Quality Assurance**
+
+- Before finalizing your output, double-check that all search queries are tailored uniquely to {args.target}.
+- Make sure that no generic information is included in the final output.
+- If any query results in ambiguous or unrelated data, document this and focus only on confirmed findings.
         """
     )
 
