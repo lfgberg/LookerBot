@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import whois
+from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from typing import Union
@@ -70,6 +71,46 @@ class WhoIsTool(Tool):
         domain_info = whois.whois(domain)
 
         return domain_info
+
+
+class ExtractDomainsTool(Tool):
+    # Tool Info
+    name = "extract_domains"
+    description = """
+    This is a tool that extracts domain names from text or markdown content.
+    """
+    inputs = {
+        "text": {
+            "type": "string",
+            "description": "The markdown or text based content to parse domain names from.",
+        },
+    }
+    output_type = "set"
+
+    # The inference code to be executed
+    def forward(self, site_content: str) -> set:
+        # Regex to match URLs (http, https, or www-based)
+        url_pattern = re.compile(
+            r'https?://[^\s)"\'<>]+|www\.[^\s)"\'<>]+', re.IGNORECASE
+        )
+
+        # Find all URL-like strings
+        urls = re.findall(url_pattern, site_content)
+
+        domains = set()
+        for url in urls:
+            try:
+                # Ensure URL has scheme for parsing
+                if not url.startswith("http"):
+                    url = "http://" + url
+                parsed_url = urlparse(url)
+                hostname = parsed_url.hostname
+                if hostname:
+                    domains.add(hostname.lower())
+            except Exception:
+                continue  # Skip bad URLs
+
+        return domains
 
 
 class GitHubSearchTool(Tool):
@@ -328,7 +369,7 @@ Your primary task is to search for GitHub repositories that are owned by or affi
 **Search Methodology:**
 
 - Craft diverse search queries (dorks) to explore various angles (e.g., by repository name patterns, mentions in README files, or special configurations) that are likely to point to repositories owned by {args.target}.
-- Ensure that each query is self-contained and clearly references {args.target} (e.g., “{args.target} AND <DOMAIN>”).
+- Ensure that each query is self-contained and clearly references {args.target} (e.g., “{args.target} AND <DOMAIN>”, "<DOMAIN>", "{args.target}").
 
 **Avoid Hallucination:**
 
@@ -377,8 +418,7 @@ final_answer(unique_results)
         """
     )
 
-    # Run trufflehog on each one to find secrets - this uses less compute and is a better tool than using the LLMs
-    # Takes a looong time
+    # Run trufflehog on each one to find secrets
     github_findings = scan_repos(repos, config.max_workers)
     save_report(github_findings, config.outfile)
 
