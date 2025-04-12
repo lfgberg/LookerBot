@@ -5,6 +5,8 @@ import re
 import json
 import os
 import subprocess
+import whois
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from typing import Union
 from config import Config, Secrets, load_config, parse_arguments
@@ -46,6 +48,28 @@ class VisitWebsiteTool(Tool):
             return f"Error fetching the webpage: {str(e)}"
         except Exception as e:
             return f"An unexpected error occurred: {str(e)}"
+
+
+class WhoIsTool(Tool):
+    # Tool Info
+    name = "whois_lookup"
+    description = """
+    This is a tool that queries the WHOIS data for a given domain. It returns the fetched data for the domain including the domain name, registrar, etc.
+    """
+    inputs = {
+        "domain": {
+            "type": "string",
+            "description": "The domain name to fetch WHOIS data on.",
+        },
+    }
+    output_type = "string"
+
+    # The inference code to be executed
+    def forward(self, domain: str):
+
+        domain_info = whois.whois(domain)
+
+        return domain_info
 
 
 class GitHubSearchTool(Tool):
@@ -187,18 +211,28 @@ def scan_repo_with_trufflehog(url: str) -> list[str]:
     return findings
 
 
-def scan_repos(repos: list[str]) -> dict:
-    result = {}
+def scan_repos(repos: list[str], max_workers: int) -> dict:
+    results = {}
 
-    for repo in tqdm(repos, desc="Scanning Repos"):
-        findings = scan_repo_with_trufflehog(repo)
-
-        if findings:
-            result[repo] = {"findings": findings}
-        else:
-            result[repo] = {}
-
-    return result
+    # Using a ThreadPoolExecutor for concurrent execution
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_repo = {
+            executor.submit(scan_repo_with_trufflehog, repo): repo for repo in repos
+        }
+        for future in tqdm(
+            as_completed(future_to_repo), total=len(repos), desc="Scanning Repos"
+        ):
+            repo = future_to_repo[future]
+            try:
+                findings = future.result()
+                if findings:
+                    results[repo] = {"github_findings": findings}
+                else:
+                    results[repo] = {}
+            except Exception as exc:
+                print(f"Error processing repo {repo}: {exc}")
+                results[repo] = {}
+    return results
 
 
 def save_report(data: dict, filename: str) -> None:
@@ -294,7 +328,8 @@ def main():
     )
 
     # Run trufflehog on each one to find secrets - this uses less compute and is a better tool than using the LLMs
-    github_findings = scan_repos(repos)
+    # Takes a looong time
+    github_findings = scan_repos(repos, config.max_workers)
     save_report(github_findings, "output.json")
 
 

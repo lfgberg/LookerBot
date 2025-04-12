@@ -24,6 +24,7 @@ class Config(BaseModel):
     hugging_face: HuggingFace
     lite_llm: GenericModel
     open_ai: GenericModel
+    max_workers: int
 
 
 class Secrets(BaseModel):

@@ -9,3 +9,5 @@ argparse
 pathlib
 pydantic
 pyyaml
+python-whois
+concurrent
