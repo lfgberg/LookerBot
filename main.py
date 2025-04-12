@@ -179,6 +179,11 @@ def load_model(
 
 
 def scan_repo_with_trufflehog(url: str) -> list[str]:
+    """
+    Uses TruffleHog to scan a GitHub repository and pull JSON output
+    Takes a URL string of the repo to scan, returns a list of findings in JSON format
+    Relies on trufflehog being installed
+    """
     # Run the command and capture the output
     result = subprocess.run(
         [
@@ -212,6 +217,20 @@ def scan_repo_with_trufflehog(url: str) -> list[str]:
 
 
 def scan_repos(repos: list[str], max_workers: int) -> dict:
+    """
+    Concurrently loops through a list of provided GitHub repos and scans them with trufflehog
+    Takes a list of repos, and a max number of workers/threads to use
+    Outputs a dict in the following format with any potential findings:
+    {
+        "<REPO URL1>": {
+            "github_findings": [{finding1}, {finding2}]
+        },
+        "<REPO URL2>": {
+            "github_findings": [{finding1}, {finding2}]
+        }
+    }
+    """
+
     results = {}
 
     # Using a ThreadPoolExecutor for concurrent execution
@@ -340,7 +359,10 @@ for query in queries:
     result = github_search(query=query, mode="repositories")
     results.extend(result)
 
-final_answer(results)
+# Deduplicate the results.
+unique_results = list(set(results))
+    
+final_answer(unique_results)
 ```
 
 - Ensure that your final answer includes only verified and trustworthy information.
@@ -358,7 +380,7 @@ final_answer(results)
     # Run trufflehog on each one to find secrets - this uses less compute and is a better tool than using the LLMs
     # Takes a looong time
     github_findings = scan_repos(repos, config.max_workers)
-    save_report(github_findings, "output.json")
+    save_report(github_findings, config.outfile)
 
 
 if __name__ == "__main__":

@@ -8,3 +8,4 @@ open_ai:
   model_id: gpt-4o-mini
   api_base: https://api.openai.com/v1/
 max_workers: 10
+outfile: "output.json"

@@ -25,6 +25,7 @@ class Config(BaseModel):
     lite_llm: GenericModel
     open_ai: GenericModel
     max_workers: int
+    outfile: str
 
 
 class Secrets(BaseModel):
