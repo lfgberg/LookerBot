@@ -3,6 +3,8 @@ import pathlib
 import yaml
 import re
 import argparse
+from dotenv import load_dotenv
+import os
 
 
 class HuggingFace(BaseModel):
@@ -25,15 +27,23 @@ class Config(BaseModel):
     lite_llm: GenericModel
     open_ai: GenericModel
     max_workers: int
-    outfile: str
+    outfile: str  # TODO: Validate this
+    os: str  # TODO: Validate this
 
 
-class Secrets(BaseModel):
+# TODO: This should use pydantic
+class Secrets:
     """Secrets class to hold API Keys"""
 
     github: str
     huggingface: str
     openai: str
+
+    def __init__(self):
+        load_dotenv()
+        self.github = os.getenv("GITHUB_API_KEY")
+        self.openai = os.getenv("OPENAI_API_KEY")
+        self.huggingface = os.getenv("HF_API_KEY")
 
 
 def load_config(path: str) -> dict:

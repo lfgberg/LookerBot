@@ -1,8 +1,6 @@
 from argparse import Namespace
-from pydantic import BaseModel
 from utils import load_model, scan_repos
 from config import Config, Secrets
-from typing import Union
 from smolagents import (
     OpenAIServerModel,
     HfApiModel,
@@ -13,14 +11,9 @@ from smolagents import (
 from tools import GitHubSearchTool, VisitWebsiteTool
 
 
-class Agent(BaseModel):
+# TODO: This should use pydantic
+class Agent:
     """SmolAgent for LookerBot."""
-
-    model: Union[OpenAIServerModel, HfApiModel, LiteLLMModel]
-    config: Config
-    secrets: Secrets
-    agent: CodeAgent
-    args: Namespace
 
     def __init__(self, args: Namespace, config: Config, secrets: Secrets):
         # Assign attributes
@@ -45,11 +38,23 @@ class Agent(BaseModel):
         """
 
         report = {}
-        report["github"] = _github_osint()  # TODO - WTF is up w this
+        report["github"] = self._github_osint()
 
         return report
 
+    def _domain_osint(self) -> dict:
+        """
+        Has the agent perform OSINT to discover domain names potentially owned by the target
+        """
+
+        result = self.agent.run()
+
     def _github_osint(self) -> dict:
+        """
+        Has the agent perform OSINT to discover GitHub repos
+        Runs found repos through trufflehog
+        """
+
         additional_info = ""
 
         if self.args.keywords or self.args.domains:
@@ -86,6 +91,7 @@ class Agent(BaseModel):
 
         - Craft diverse search queries (dorks) to explore various angles (e.g., by repository name patterns, mentions in README files, or special configurations) that are likely to point to repositories owned by {self.args.target}.
         - Ensure that each query is self-contained and clearly references {self.args.target} (e.g., “{self.args.target} AND <DOMAIN>”, "<DOMAIN>", "{self.args.target}").
+        - You must be as thorough as possible with your searches. You must uncover all repositories potentially belonging to {self.args.target} by performing as many targeted queries as you can come up with.
 
         **Avoid Hallucination:**
 
@@ -134,7 +140,9 @@ class Agent(BaseModel):
             """
         )
 
+        # TODO: Have a second run of the ai examine the readmes of the repositories and remove anything that doesn't seem related to the target
+
         # Run trufflehog on each one to find secrets
-        github_findings = scan_repos(repos, self.config.max_workers)
+        github_findings = scan_repos(repos, self.config.max_workers, self.config.os)
 
         return github_findings

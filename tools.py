@@ -4,6 +4,9 @@ import re
 import markdownify
 from smolagents import Tool
 from urllib.parse import urlparse
+from config import Secrets
+
+secrets = Secrets()
 
 
 class VisitWebsiteTool(Tool):

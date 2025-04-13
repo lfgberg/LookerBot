@@ -37,16 +37,22 @@ def load_model(
     return model
 
 
-def scan_repo_with_trufflehog(url: str) -> list[str]:
+def scan_repo_with_trufflehog(url: str, os: str) -> list[str]:
     """
     Uses TruffleHog to scan a GitHub repository and pull JSON output
     Takes a URL string of the repo to scan, returns a list of findings in JSON format
     Relies on trufflehog being installed
     """
+    # Use the correct command based on the OS
+    if os.lower() == "windows" or os.lower() == "win":
+        command = "trufflehog.exe"
+    else:
+        command = "trufflehog"
+
     # Run the command and capture the output
     result = subprocess.run(
         [
-            "trufflehog.exe",
+            command,
             "--json",
             "--results=verified,unknown",
             "--no-update",
@@ -75,7 +81,7 @@ def scan_repo_with_trufflehog(url: str) -> list[str]:
     return findings
 
 
-def scan_repos(repos: list[str], max_workers: int) -> dict:
+def scan_repos(repos: list[str], max_workers: int, os: str) -> dict:
     """
     Concurrently loops through a list of provided GitHub repos and scans them with trufflehog
     Takes a list of repos, and a max number of workers/threads to use
@@ -95,7 +101,7 @@ def scan_repos(repos: list[str], max_workers: int) -> dict:
     # Using a ThreadPoolExecutor for concurrent execution
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_repo = {
-            executor.submit(scan_repo_with_trufflehog, repo): repo for repo in repos
+            executor.submit(scan_repo_with_trufflehog, repo, os): repo for repo in repos
         }
         for future in tqdm(
             as_completed(future_to_repo), total=len(repos), desc="Scanning Repos"
