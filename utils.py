@@ -3,6 +3,7 @@ from config import Config, Secrets
 from typing import Union
 import subprocess
 import json
+from datetime import datetime
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -119,6 +120,13 @@ def scan_repos(repos: list[str], max_workers: int, os: str) -> dict:
     return results
 
 
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
+
 def save_report(data: dict, filename: str) -> None:
     """
     Saves a dictionary to a JSON file.
@@ -129,7 +137,7 @@ def save_report(data: dict, filename: str) -> None:
     """
     try:
         with open(filename, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
+            json.dump(data, f, indent=4, ensure_ascii=False, cls=CustomJSONEncoder)
         print(f"Dictionary saved to {filename}")
     except Exception as e:
         print(f"Error saving dictionary to JSON: {e}")

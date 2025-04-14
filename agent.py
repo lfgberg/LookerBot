@@ -44,17 +44,20 @@ class Agent:
         """
 
         report = {}
-        # report["github"] = self._github_osint()
-        self._domain_osint()
+        domains = self._domain_osint()
+        report["domains"] = domains
+        report["github"] = self._github_osint(list(domains.keys()))
 
         return report
 
     def _domain_osint(self) -> dict:
         """
         Has the agent perform OSINT to discover domain names potentially owned by the target
+        Applies a reasoning pass to filter the results with confidence levels
         """
 
-        result = self.agent.run(
+        # Step 1: Collection - AI runs searches to find domains
+        initial_domains = self.agent.run(
             f"""
         **Role & Context**  
         You are Looker, a highly skilled OSINT and cybersecurity expert employed by {self.args.target}. Your task is to discover and aggregate all domain names that may be owned or affiliated with {self.args.target}. These will be gathered through public search results, web scraping, and WHOIS records. Your goal is to produce a structured, verifiable report that can be reviewed by human analysts or reused in future automated analysis.
@@ -73,6 +76,7 @@ class Agent:
 
         - **Initial Domain Discovery via Search:**  
         Run targeted queries via `BetterDuckDuckGoSearchTool` to discover websites related to {self.args.target}. Parse all result URLs and extract domain names.
+        You must be as thorough as possible with your search queries. Include more than just the provided examples to attempt to discover all possible domains.
 
         - **Web Content Analysis:**  
         Visit each domain and scan for additional domain mentions (in hyperlinks, text, and assets). Extract and collect all unique domains.
@@ -133,9 +137,78 @@ class Agent:
         """
         )
 
-        return result
+        # Step 2: Reasoning Pass - AI evaluates and filters domains
+        final_report = {}
+        initial_domains = dict(initial_domains)
 
-    def _github_osint(self) -> dict:
+        for domain, whois_data in initial_domains.items():
+            confidence_assessment = self.agent.run(
+                f"""
+                **Role & Context**  
+                You are Looker, a cybersecurity OSINT agent. You have received a dictionary of domains and their WHOIS records that were discovered in relation to {self.args.target}. Your job is to assess each domain and determine whether it is likely affiliated with the target organization.
+
+                **Instructions**
+
+                - For each domain, examine the WHOIS record and domain name.
+                - YOU MUST EXAMINE EVERY DOMAIN PROVIDED TO YOU.
+                - Based on registrant name, email, org name, prior knowledge, or other clues, determine if it appears to belong to {self.args.target}.
+                - Assign a confidence flag:  
+                - `"yes"` — clearly belongs to the target  
+                - `"maybe"` — unclear but possible  
+                - `"no"` — unrelated or belongs to someone else
+                - Err on the side of caution when assigning a confidence flag. Anything flagged as maybe will be manually verified by another analyst, don't flag something as yes unless you are completely confident it belongs to or is affiliated with {self.args.target}
+
+                **Avoid Hallucination**  
+                - Only rely on WHOIS data and other clues. Do not invent data.
+                - Use your web search and visit website tools to find more information about a domain if you're unsure of it's relation to {self.args.target}.
+                - Do not use general assumptions (e.g., “.org domains are always nonprofits”).  
+                - Use reasoning based on actual registrant data or domain naming.
+
+                **Final Output Format**
+
+                Return a Python dictionary with this structure:
+
+                ```python
+                result = {{
+                    "example.com": {{
+                        "confidence": "yes",
+                        "whois": "<WHOIS RECORD>"
+                    }},
+                }}
+
+                final_answer(result)
+                ```
+
+                - You must ensure you've included the entire provided whois record in the final report.
+
+                Your input:
+                ```python
+                {{
+                    "{domain}": {whois_data}
+                }}
+                ```
+                """
+            )
+
+            # Pull the result - include if it's a yes or maybe
+            try:
+                confidence_assessment = dict(confidence_assessment)
+                confidence = confidence_assessment[domain].get("confidence", "no")
+                if confidence in ("yes", "maybe"):
+                    final_report[domain] = {
+                        "confidence": confidence,
+                        "whois": whois_data,
+                    }
+            except Exception as e:
+                final_report[domain] = {
+                    "confidence": "ERROR - MANUALLY VERIFY",
+                    "whois": whois_data,
+                }
+                print(f"Error: Failed to determine confidence level for {domain}")
+
+        return final_report
+
+    def _github_osint(self, domains: list[str]) -> dict:
         """
         Has the agent perform OSINT to discover GitHub repos
         Runs found repos through trufflehog
@@ -143,10 +216,12 @@ class Agent:
 
         additional_info = ""
 
-        if self.args.keywords or self.args.domains:
+        if self.args.keywords or domains:
             context = ""
-            if self.args.domains:
-                context += f"- The known domains for {self.args.target} are {self.args.domains}.\n"
+            if domains:
+                context += (
+                    f"- The known domains for {self.args.target} are {domains}.\n"
+                )
             if self.args.keywords:
                 context += f"- Some additional search keywords for {self.args.target} are {self.args.keywords}.\n"
 
@@ -198,6 +273,8 @@ class Agent:
         queries = [
             "{self.args.target} AND <verified_domain_or_keyword>",
             "{self.args.target} AND <additional_verified_keyword>",
+            "{self.args.target}",
+            "<verified_domain_or_keyword>",
             # Add more queries as needed
         ]
 
@@ -215,6 +292,7 @@ class Agent:
         ```
 
         - Ensure that your final answer includes only verified and trustworthy information.
+        - The resulting format must be a list of urls as indicated in the example.
 
         {additional_info}
 

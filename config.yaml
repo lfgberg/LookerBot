@@ -9,4 +9,4 @@ open_ai:
   api_base: https://api.openai.com/v1/
 max_workers: 10
 outfile: "output.json"
-os: "linux"
+os: "windows"

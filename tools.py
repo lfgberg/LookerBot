@@ -104,6 +104,7 @@ class ExtractDomainsTool(Tool):
         return domains
 
 
+# TODO: consider grep.app?
 class GitHubSearchTool(Tool):
     # Tool Info
     name = "github_search"
