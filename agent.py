@@ -1,14 +1,14 @@
 from argparse import Namespace
 from utils import load_model, scan_repos
 from config import Config, Secrets
-from smolagents import (
-    OpenAIServerModel,
-    HfApiModel,
-    LiteLLMModel,
-    CodeAgent,
-    DuckDuckGoSearchTool,
+from smolagents import CodeAgent
+from tools import (
+    GitHubSearchTool,
+    VisitWebsiteTool,
+    WhoIsTool,
+    ExtractDomainsTool,
+    BetterDuckDuckGoSearchTool,
 )
-from tools import GitHubSearchTool, VisitWebsiteTool
 
 
 # TODO: This should use pydantic
@@ -26,7 +26,13 @@ class Agent:
 
         # Create the agent with the created model
         self.agent = CodeAgent(
-            tools=[GitHubSearchTool(), VisitWebsiteTool(), DuckDuckGoSearchTool()],
+            tools=[
+                GitHubSearchTool(),
+                VisitWebsiteTool(),
+                BetterDuckDuckGoSearchTool(),
+                WhoIsTool(),
+                ExtractDomainsTool(),
+            ],
             model=self.model,
             add_base_tools=True,
             additional_authorized_imports=["json"],
@@ -38,7 +44,8 @@ class Agent:
         """
 
         report = {}
-        report["github"] = self._github_osint()
+        # report["github"] = self._github_osint()
+        self._domain_osint()
 
         return report
 
@@ -47,7 +54,86 @@ class Agent:
         Has the agent perform OSINT to discover domain names potentially owned by the target
         """
 
-        result = self.agent.run()
+        result = self.agent.run(
+            f"""
+        **Role & Context**  
+        You are Looker, a highly skilled OSINT and cybersecurity expert employed by {self.args.target}. Your task is to discover and aggregate all domain names that may be owned or affiliated with {self.args.target}. These will be gathered through public search results, web scraping, and WHOIS records. Your goal is to produce a structured, verifiable report that can be reviewed by human analysts or reused in future automated analysis.
+
+        **Task Description**  
+        Use a multi-stage approach to discover candidate domains related to {self.args.target}:
+
+        1. Use DuckDuckGo to find initial candidate websites and domains.  
+        2. Visit these sites to extract additional linked or mentioned domains.  
+        3. Run WHOIS lookups on all discovered domains.  
+        4. Aggregate a structured final report that links each domain to its full WHOIS record.
+
+        **Instructions & Guidelines**
+
+        **Discovery Methodology:**
+
+        - **Initial Domain Discovery via Search:**  
+        Run targeted queries via `BetterDuckDuckGoSearchTool` to discover websites related to {self.args.target}. Parse all result URLs and extract domain names.
+
+        - **Web Content Analysis:**  
+        Visit each domain and scan for additional domain mentions (in hyperlinks, text, and assets). Extract and collect all unique domains.
+
+        - **WHOIS Lookup:**  
+        For each discovered domain, retrieve WHOIS data using the `whois_lookup` tool.  
+        Do not attempt to verify or match ownership—just aggregate the data.
+
+        **Avoid Hallucination:**  
+
+        - Do not invent or infer ownership.  
+        - Only include domains discovered via search engine results or actual webpage content.  
+        - Always fetch real WHOIS data—no mocking or simulating.
+
+        **Output Format:**  
+        The final report should be a Python dictionary:
+
+        - **Keys** = discovered domain names (e.g., `example.com`)  
+        - **Values** = WHOIS results as returned from the `whois_lookup` tool (raw text or structured string)
+
+        ```python
+        search_queries = [
+            "{self.args.target} official website",
+            "{self.args.target} domains",
+            "{self.args.target} contact page",
+            "{self.args.target} site",
+            "{self.args.target} blog",
+        ]
+
+        initial_domains = set()
+
+        # Step 1: DuckDuckGo search
+        for query in search_queries:
+            search_results = duckduckgo_search(query=query)
+            initial_domains.update(extract_domains(text=search_results))
+
+        # Step 2: Visit each domain and extract more
+        all_discovered_domains = set(initial_domains)
+        for domain in initial_domains:
+            try:
+                content = visit_website(url=f"http://{{domain}}")
+                more_domains = extract_domains(text=content)
+                all_discovered_domains.update(more_domains)
+            except:
+                continue
+
+        # Step 3: WHOIS lookup
+        domain_whois_report = {{}}
+        for domain in all_discovered_domains:
+            try:
+                whois_data = whois_lookup(domain=domain)
+                domain_whois_report[domain] = whois_data
+            except:
+                continue
+
+        final_answer(domain_whois_report)
+        ```
+        """
+        )
+
+        return result
 
     def _github_osint(self) -> dict:
         """

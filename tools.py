@@ -1,3 +1,5 @@
+import random
+import time
 import whois
 import requests
 import re
@@ -5,6 +7,7 @@ import markdownify
 from smolagents import Tool
 from urllib.parse import urlparse
 from config import Secrets
+from typing import Optional
 
 secrets = Secrets()
 
@@ -73,17 +76,17 @@ class ExtractDomainsTool(Tool):
             "description": "The markdown or text based content to parse domain names from.",
         },
     }
-    output_type = "set"
+    output_type = "array"
 
     # The inference code to be executed
-    def forward(self, site_content: str) -> set:
+    def forward(self, text: str) -> set:
         # Regex to match URLs (http, https, or www-based)
         url_pattern = re.compile(
             r'https?://[^\s)"\'<>]+|www\.[^\s)"\'<>]+', re.IGNORECASE
         )
 
         # Find all URL-like strings
-        urls = re.findall(url_pattern, site_content)
+        urls = re.findall(url_pattern, text)
 
         domains = set()
         for url in urls:
@@ -132,7 +135,7 @@ class GitHubSearchTool(Tool):
         url = f"https://api.github.com/search/{mode}"
 
         headers = {
-            "Authorization": f"Bearer {secrets.github}",  # TODO - this is obnoxious
+            "Authorization": f"Bearer {secrets.github}",
         }
 
         params = {"q": query, "per_page": 100}
@@ -178,3 +181,70 @@ class GitHubSearchTool(Tool):
             return f"Error fetching the webpage: {str(e)}"
 
         return results
+
+
+class BetterDuckDuckGoSearchTool(Tool):
+    name = "duckduckgo_search"
+    description = """Performs a DuckDuckGo web search based on your query (like Google search) and returns the top search results."""
+    inputs = {
+        "query": {"type": "string", "description": "The search query to perform."}
+    }
+    output_type = "string"
+
+    def __init__(
+        self,
+        max_results: int = 10,
+        min_delay: float = 1.0,
+        max_delay: float = 3.0,
+        retries: int = 3,
+        **kwargs,
+    ):
+        super().__init__()
+        self.max_results = max_results
+        self.min_delay = min_delay
+        self.max_delay = max_delay
+        self.retries = retries
+
+        try:
+            from duckduckgo_search import DDGS
+        except ImportError as e:
+            raise ImportError(
+                "You must install the `duckduckgo_search` package. Run `pip install duckduckgo-search`."
+            ) from e
+
+        self.DDGS = DDGS
+        self.kwargs = kwargs
+
+    def _delay(self):
+        time.sleep(random.uniform(self.min_delay, self.max_delay))
+
+    def _rotate_user_agent(self) -> str:
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15A372 Safari/604.1",
+        ]
+        return random.choice(user_agents)
+
+    def forward(self, query: str) -> str:
+        last_exception: Optional[Exception] = None
+        for attempt in range(self.retries):
+            try:
+                self._delay()
+                with self.DDGS(
+                    headers={"User-Agent": self._rotate_user_agent()}, **self.kwargs
+                ) as ddgs:
+                    results = ddgs.text(query, max_results=self.max_results)
+                if not results:
+                    raise Exception(
+                        "No results found! Try a less restrictive/shorter query."
+                    )
+                postprocessed = [
+                    f"[{r['title']}]({r['href']})\n{r['body']}" for r in results
+                ]
+                return "## Search Results\n\n" + "\n\n".join(postprocessed)
+            except Exception as e:
+                last_exception = e
+                self._delay()
+        raise Exception(f"Failed after {self.retries} attempts: {last_exception}")
