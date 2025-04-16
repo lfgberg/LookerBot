@@ -11,3 +11,4 @@ pyyaml
 python-whois
 concurrent
 duckduckgo_search==8.0.0
+bandit
