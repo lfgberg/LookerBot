@@ -1,6 +1,7 @@
 from argparse import Namespace
 from utils import load_model, scan_repos
 from config import Config, Secrets
+import whois
 from smolagents import CodeAgent
 from tools import (
     GitHubSearchTool,
@@ -49,9 +50,11 @@ class Agent:
             "mode": self.args.mode,
         }
         report["organization_summary"] = self._organization_summary()
-        domains = self._domain_osint()
+        domains = self._domain_osint(report["organization_summary"])
         report["domains"] = domains
-        report["github"] = self._github_osint(list(domains.keys()))
+        report["github"] = self._github_osint(
+            list(domains.keys()), report["organization_summary"]
+        )
 
         return report
 
@@ -94,7 +97,7 @@ class Agent:
 
         return organization_summary
 
-    def _domain_osint(self) -> dict:
+    def _domain_osint(self, context: dict) -> dict:
         """
         Has the agent perform OSINT to discover domain names potentially owned by the target
         Applies a reasoning pass to filter the results with confidence levels
@@ -104,15 +107,19 @@ class Agent:
         initial_domains = self.agent.run(
             f"""
         **Role & Context**  
-        You are Looker, a highly skilled OSINT and cybersecurity expert employed by {self.args.target}. Your task is to discover and aggregate all domain names that may be owned or affiliated with {self.args.target}. These will be gathered through public search results, web scraping, and WHOIS records. Your goal is to produce a structured, verifiable report that can be reviewed by human analysts or reused in future automated analysis.
+        You are Looker, a highly skilled OSINT and cybersecurity expert employed by {self.args.target}. Your task is to discover and aggregate all domain names that may be owned or affiliated with {self.args.target}. These will be gathered through public search results, and web scraping. Your goal is to produce a list of all domains belonging to an organization, being as detailed as possible with your search queries.
+
+        Here is some additional information on your target organization:
+        ```json
+        {context}
+        ```
 
         **Task Description**  
         Use a multi-stage approach to discover candidate domains related to {self.args.target}:
 
         1. Use DuckDuckGo to find initial candidate websites and domains.  
         2. Visit these sites to extract additional linked or mentioned domains.  
-        3. Run WHOIS lookups on all discovered domains.  
-        4. Aggregate a structured final report that links each domain to its full WHOIS record.
+        3. Return a final list of discovered domains
 
         **Instructions & Guidelines**
 
@@ -120,14 +127,10 @@ class Agent:
 
         - **Initial Domain Discovery via Search:**  
         Run targeted queries via `BetterDuckDuckGoSearchTool` to discover websites related to {self.args.target}. Parse all result URLs and extract domain names.
-        You must be as thorough as possible with your search queries. Include more than just the provided examples to attempt to discover all possible domains.
+        You must be as thorough as possible with your search queries. Include more than just the provided examples to attempt to discover all possible domains. You should be as exhaustive as possible with your search queries.
 
         - **Web Content Analysis:**  
         Visit each domain and scan for additional domain mentions (in hyperlinks, text, and assets). Extract and collect all unique domains.
-
-        - **WHOIS Lookup:**  
-        For each discovered domain, retrieve WHOIS data using the `whois_lookup` tool.  
-        Do not attempt to verify or match ownership—just aggregate the data.
 
         **Avoid Hallucination:**  
 
@@ -136,10 +139,7 @@ class Agent:
         - Always fetch real WHOIS data—no mocking or simulating.
 
         **Output Format:**  
-        The final report should be a Python dictionary:
-
-        - **Keys** = discovered domain names (e.g., `example.com`)  
-        - **Values** = WHOIS results as returned from the `whois_lookup` tool (raw text or structured string)
+        The final report should be a Python set of discovered domains
 
         ```python
         search_queries = [
@@ -167,25 +167,27 @@ class Agent:
             except:
                 continue
 
-        # Step 3: WHOIS lookup
-        domain_whois_report = {{}}
-        for domain in all_discovered_domains:
-            try:
-                whois_data = whois_lookup(domain=domain)
-                domain_whois_report[domain] = whois_data
-            except:
-                continue
-
-        final_answer(domain_whois_report)
+        # Step 3: Return the final answer
+        final_answer(all_discovered_domains)
         ```
         """
         )
 
+        # Lookup the WHOIS data for the domains it found and generate a report
+        domain_whois_report = {}
+        for domain in initial_domains:
+            try:
+                whois_data = whois.whois(domain)
+                domain_whois_report[domain] = whois_data
+            except:
+                # Sometimes the lookup just fails for a given domain - if it fails we just include it without a whois value
+                domain_whois_report[domain] = ""
+                continue
+
         # Step 2: Reasoning Pass - AI evaluates and filters domains
         final_report = {}
-        initial_domains = dict(initial_domains)
 
-        for domain, whois_data in initial_domains.items():
+        for domain, whois_data in domain_whois_report.items():
             confidence_assessment = self.agent.run(
                 f"""
                 **Role & Context**  
@@ -252,7 +254,7 @@ class Agent:
 
         return final_report
 
-    def _github_osint(self, domains: list[str]) -> dict:
+    def _github_osint(self, domains: list[str], context: dict) -> dict:
         """
         Has the agent perform OSINT to discover GitHub repos
         Runs found repos through trufflehog
@@ -280,6 +282,11 @@ class Agent:
             f"""
         **Role & Context**
         You are Looker, a highly skilled OSINT and cybersecurity expert employed by {self.args.target}. Your duty is to audit the operational security of {self.args.target} by gathering comprehensive OSINT, especially by identifying all GitHub repositories that potentially belong to this organization. Your findings should contribute to preventing vulnerabilities that could lead to security breaches, thereby maximizing profit and ensuring operational security.
+
+        Here is some additional information on your target organization:
+        ```json
+        {context}
+        ```
 
         **Task Description**
         Your primary task is to search for GitHub repositories that are owned by or affiliated with {self.args.target}. Use GitHub dorks and custom search queries based on keywords that are tightly related to {self.args.target}—this should include the organization’s name, its key domain names, and any additional context provided (e.g., relevant product names, acronyms, or subsidiaries). Do not use generic or unrelated keywords (e.g., "healthcare") and do not generate or simulate fake results.
