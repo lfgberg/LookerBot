@@ -1,7 +1,6 @@
 from argparse import Namespace
-from utils import load_model, scan_repos
+from utils import fetch_whois_concurrently, load_model, scan_repos, fetch_github_readme
 from config import Config, Secrets
-import whois
 from smolagents import CodeAgent
 from tools import (
     GitHubSearchTool,
@@ -72,6 +71,7 @@ class Agent:
         2. **Headquarters location** - Where is the organization based (city, country)?
         3. **Number of employees** - Provide an estimate of the organization's size in terms of employee count (ballpark figure).
         4. **Primary domain** - Identify the primary domain or website of the organization.
+        5. **Subsidiaries** - Identify any subsidiaries, companies owned by the target organization.
 
         **Instructions & Guidelines**
 
@@ -88,6 +88,7 @@ class Agent:
             "headquarters": "City, Country",
             "employee_count_estimate": "Approximately X employees",
             "primary_domain": "www.example.com"
+            "subsidiaries": "Company 1, Company 2, etc."
         }}
         ```
 
@@ -174,15 +175,7 @@ class Agent:
         )
 
         # Lookup the WHOIS data for the domains it found and generate a report
-        domain_whois_report = {}
-        for domain in initial_domains:
-            try:
-                whois_data = whois.whois(domain)
-                domain_whois_report[domain] = whois_data
-            except:
-                # Sometimes the lookup just fails for a given domain - if it fails we just include it without a whois value
-                domain_whois_report[domain] = ""
-                continue
+        domain_whois_report = fetch_whois_concurrently(initial_domains)
 
         # Step 2: Reasoning Pass - AI evaluates and filters domains
         final_report = {}
@@ -192,6 +185,11 @@ class Agent:
                 f"""
                 **Role & Context**  
                 You are Looker, a cybersecurity OSINT agent. You have received a dictionary of domains and their WHOIS records that were discovered in relation to {self.args.target}. Your job is to assess each domain and determine whether it is likely affiliated with the target organization.
+
+                Here is some additional information on your target organization:
+                ```json
+                {context}
+                ```
 
                 **Instructions**
 
@@ -218,6 +216,7 @@ class Agent:
                 result = {{
                     "example.com": {{
                         "confidence": "yes",
+                        "reason: "The WHOIS record for this domain references {self.args.target}",
                         "whois": "<WHOIS RECORD>"
                     }},
                 }}
@@ -228,7 +227,7 @@ class Agent:
                 - You must ensure you've included the entire provided whois record in the final report.
 
                 Your input:
-                ```python
+                ```json
                 {{
                     "{domain}": {whois_data}
                 }}
@@ -239,15 +238,18 @@ class Agent:
             # Pull the result - include if it's a yes or maybe
             try:
                 confidence_assessment = dict(confidence_assessment)
-                confidence = confidence_assessment[domain].get("confidence", "no")
+                confidence = confidence_assessment[domain].get("confidence")
+                reason = confidence_assessment[domain].get("reason")
                 if confidence in ("yes", "maybe"):
                     final_report[domain] = {
                         "confidence": confidence,
+                        "reason": reason,
                         "whois": whois_data,
                     }
             except Exception as e:
                 final_report[domain] = {
                     "confidence": "ERROR - MANUALLY VERIFY",
+                    "reason": "ERROR - MANUALLY VERIFY",
                     "whois": whois_data,
                 }
                 print(f"Error: Failed to determine confidence level for {domain}")
@@ -355,9 +357,86 @@ class Agent:
             """
         )
 
-        # TODO: Have a second run of the ai examine the readmes of the repositories and remove anything that doesn't seem related to the target
+        # Step 2: Reasoning Pass - AI evaluates and filters domains
+        final_report = {}
+
+        for repo in repos:
+            # Attempt to fetch the README file
+            readme = fetch_github_readme(repo)
+
+            confidence_assessment = self.agent.run(
+                f"""
+                **Role & Context**  
+                You are Looker, a cybersecurity OSINT agent. You have received a list of GitHub repositories that were discovered in relation to {self.args.target}. Your job is to assess each reposiotory and determine whether it is likely affiliated with the target organization.
+
+                Here is some additional information on your target organization:
+                ```json
+                {context}
+                ```
+
+                **Instructions**
+
+                - For each domain, examine the GitHub repo and README file.
+                - YOU MUST EXAMINE EVERY repository PROVIDED TO YOU.
+                - Based on the repository, README file, or other clues, determine if it appears to belong to {self.args.target}.
+                - Assign a confidence flag:  
+                - `"yes"` — clearly belongs to the target  
+                - `"maybe"` — unclear but possible  
+                - `"no"` — unrelated or belongs to someone else
+                - Err on the side of caution when assigning a confidence flag. Anything flagged as maybe will be manually verified by another analyst, don't flag something as yes unless you are completely confident it belongs to or is affiliated with {self.args.target}
+
+                **Avoid Hallucination**  
+                - Only rely on real data and other clues. Do not invent data.
+                - Use your web search and visit website tools to find more information about a repository if you're unsure of it's relation to {self.args.target}.
+                - Do not use general assumptions
+
+                **Final Output Format**
+
+                Return a Python dictionary with this structure:
+
+                ```python
+                result = {{
+                    "repo URL": {{
+                        "confidence": "yes",
+                        "reason": "{self.args.target} is referenced in the README file"
+                    }},
+                }}
+
+                final_answer(result)
+                ```
+
+                Your input:
+
+                Repository URL: `{repo}`
+                
+                README File:
+
+                ```text
+                {readme}
+                ```
+                """
+            )
+
+            # Pull the result - include if it's a yes or maybe
+            try:
+                confidence_assessment = dict(confidence_assessment)
+                confidence = confidence_assessment[repo].get("confidence")
+                reason = confidence_assessment[repo].get("reason")
+                if confidence in ("yes", "maybe"):
+                    final_report[repo] = {
+                        "confidence": confidence,
+                        "reason": reason,
+                    }
+            except Exception as e:
+                final_report[repo] = {
+                    "confidence": "ERROR - MANUALLY VERIFY",
+                    "reason": "ERROR - MANUALLY VERIFY",
+                }
+                print(
+                    f"Error: Failed to determine confidence level or reasoning for {repo}"
+                )
 
         # Run trufflehog on each one to find secrets
-        github_findings = scan_repos(repos, self.config.max_workers, self.config.os)
+        final_report = scan_repos(final_report, self.config.max_workers, self.config.os)
 
-        return github_findings
+        return final_report

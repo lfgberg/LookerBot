@@ -1,4 +1,6 @@
+import requests
 from smolagents import OpenAIServerModel, HfApiModel, LiteLLMModel
+import whois
 from config import Config, Secrets
 from typing import Union
 import subprocess
@@ -82,22 +84,13 @@ def scan_repo_with_trufflehog(url: str, os: str) -> list[str]:
     return findings
 
 
-def scan_repos(repos: list[str], max_workers: int, os: str) -> dict:
+def scan_repos(repos: dict, max_workers: int, os: str) -> dict:
     """
-    Concurrently loops through a list of provided GitHub repos and scans them with trufflehog
-    Takes a list of repos, and a max number of workers/threads to use
-    Outputs a dict in the following format with any potential findings:
-    {
-        "<REPO URL1>": {
-            "trufflehog_findings": [{finding1}, {finding2}]
-        },
-        "<REPO URL2>": {
-            "trufflehog_findings": [{finding1}, {finding2}]
-        }
-    }
+    Concurrently loops through a dictionary of provided GitHub repos and scans them with trufflehog.
+    Appends the results to the existing dictionary.
+    Takes a dictionary of repos, and a max number of workers/threads to use.
+    Outputs a dict with any potential findings.
     """
-
-    results = {}
 
     # Using a ThreadPoolExecutor for concurrent execution
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -111,13 +104,17 @@ def scan_repos(repos: list[str], max_workers: int, os: str) -> dict:
             try:
                 findings = future.result()
                 if findings:
-                    results[repo] = {"trufflehog_findings": findings}
+                    repos[repo][
+                        "trufflehog_findings"
+                    ] = findings  # Append results to the existing repo dict
                 else:
-                    results[repo] = {}
+                    repos[repo]["trufflehog_findings"] = {}  # Empty dict if no findings
             except Exception as exc:
                 print(f"Error processing repo {repo}: {exc}")
-                results[repo] = {}
-    return results
+                repos[repo][
+                    "trufflehog_findings"
+                ] = {}  # Append empty findings on error
+    return repos
 
 
 class CustomJSONEncoder(json.JSONEncoder):
@@ -141,3 +138,71 @@ def save_report(data: dict, filename: str) -> None:
         print(f"Dictionary saved to {filename}")
     except Exception as e:
         print(f"Error saving dictionary to JSON: {e}")
+
+
+def fetch_github_readme(repo_url: str) -> str:
+    """
+    Fetches the README.md file from a GitHub repository URL.
+
+    Args:
+        repo_url (str): The URL of the GitHub repository (e.g., 'https://github.com/user/repo').
+
+    Returns:
+        str: The content of the README.md file, or a message if the file is not found.
+    """
+    # Extract the repository owner and name from the URL
+    parts = repo_url.strip("/").split("/")
+    if len(parts) < 2:
+        return "Invalid repository URL."
+
+    owner, repo_name = parts[-2], parts[-1]
+
+    # Construct the raw content URL for the README.md file
+    raw_url = f"https://raw.githubusercontent.com/{owner}/{repo_name}/main/README.md"
+
+    try:
+        response = requests.get(raw_url)
+        response.raise_for_status()  # Check if the request was successful
+
+        # If the request is successful, return the content of the README
+        return response.text
+    except requests.exceptions.HTTPError as http_err:
+        return f"HTTP error occurred: {http_err}"
+    except Exception as err:
+        return f"An error occurred: {err}"
+
+
+def get_whois_data(domain: str) -> dict:
+    """
+    Takes a single domain and returns the WHOIS data
+    """
+    try:
+        whois_data = whois.whois(domain)
+        return (domain, whois_data)
+    except Exception as e:
+        return (domain, "ERROR - MANUALLY VERIFY")
+
+
+def fetch_whois_concurrently(initial_domains: list[str]) -> dict:
+    """
+    Takes a list of domains and concurrently generates a report including WHOIS data
+    """
+    domain_whois_report = {}
+
+    with ThreadPoolExecutor(
+        max_workers=3
+    ) as executor:  # Hardcoding this as 3 because we're
+        # Use tqdm to show progress
+        futures = {
+            executor.submit(get_whois_data, domain): domain
+            for domain in initial_domains
+        }
+
+        # Use tqdm for the progress bar
+        for future in tqdm(
+            as_completed(futures), total=len(futures), desc="Fetching WHOIS data"
+        ):
+            domain, whois_data = future.result()
+            domain_whois_report[domain] = whois_data
+
+    return domain_whois_report
