@@ -44,11 +44,55 @@ class Agent:
         """
 
         report = {}
+        report["info"] = {
+            "target_organization": self.args.target,
+            "mode": self.args.mode,
+        }
+        report["organization_summary"] = self._organization_summary()
         domains = self._domain_osint()
         report["domains"] = domains
         report["github"] = self._github_osint(list(domains.keys()))
 
         return report
+
+    def _organization_summary(self) -> str:
+        """
+        Has the agent provide a summary of the target organization
+        """
+
+        organization_summary = self.agent.run(
+            f"""
+        **Role & Context**  
+        You are Looker, a highly skilled OSINT and cybersecurity expert employed by {self.args.target}. Your task is to search the internet and use your prior knowledge to gather key details about the target organization. Based on your findings, you will write a brief summary including the following information:
+
+        1. **What the organization does** - Provide a concise description of the organization's industry, products, or services.
+        2. **Headquarters location** - Where is the organization based (city, country)?
+        3. **Number of employees** - Provide an estimate of the organization's size in terms of employee count (ballpark figure).
+        4. **Primary domain** - Identify the primary domain or website of the organization.
+
+        **Instructions & Guidelines**
+
+        1. Search the internet for reliable, verifiable sources to extract this information. Use reputable websites such as the official company site, LinkedIn, or news articles, if necessary.
+        2. Use prior knowledge to fill in any gaps where real-time search results are unavailable, but avoid speculation.
+        3. Provide the summary in a human-readable format.
+
+        The format for your answer should be:
+
+        ```python
+        organization_summary = {{
+            "company_name": "{self.args.target}",
+            "what_they_do": "Verbose description of services or industry",
+            "headquarters": "City, Country",
+            "employee_count_estimate": "Approximately X employees",
+            "primary_domain": "www.example.com"
+        }}
+        ```
+
+        Once you have gathered the necessary information, provide the final summary in the specified format. Do not invent details; only include verifiable facts from your search and prior knowledge.
+        """
+        )
+
+        return organization_summary
 
     def _domain_osint(self) -> dict:
         """
