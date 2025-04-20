@@ -54,6 +54,9 @@ class Agent:
         report["github"] = self._github_osint(
             list(domains.keys()), report["organization_summary"]
         )
+        report["duck_dorks"] = self._duck_dorks(
+            list(domains.keys()), report["organization_summary"]
+        )
 
         return report
 
@@ -97,6 +100,70 @@ class Agent:
         )
 
         return organization_summary
+
+    def _duck_dorks(self, domains: list[str], context: dict) -> dict:
+        """
+        Performs deep DuckDuckGo dorking to uncover exposed services, login pages, and interesting directories
+        related to the target organization or its domains.
+        """
+        dork_results = self.agent.run(
+            f"""
+            **Role & Context**
+            You are Looker, a cybersecurity OSINT agent performing reconnaissance on {self.args.target}. Your task is to use DuckDuckGo dorking techniques to discover potentially interesting or sensitive pages exposed online.
+
+            **Search Target**  
+            The target organization is: {self.args.target}  
+            You may use known domains associated with this org if available.
+
+            Here is some additional information on your target organization:
+            ```json
+            {context}
+            ```
+
+            The known domains for {self.args.target} are:
+            ```text
+            {domains}
+            ```
+
+            **Objectives**
+            Generate and run a thorough set of dorks to uncover:
+            - Login pages (e.g. admin, staff, client)
+            - Exposed admin panels
+            - Directory listings
+            - Git or SVN repositories
+            - Configuration or env files
+            - File indexes (e.g. PDFs, Docs, backups)
+            - Staging or test environments
+            - Open API portals or Swagger UIs
+
+            **Dork Examples You Might Use**
+            - site:<DOMAIN> intitle:"login"
+            - site:<DOMAIN> inurl:admin
+
+            **Instructions**
+            1. Generate and run as many diverse dork queries related to the target as you can concoct.
+            2. Parse and return links and page titles from the results.
+            3. Structure the output clearly, mapping each dork query to the results it found.
+
+            **Output Format**
+            ```json
+            {{
+                "dork query here": [
+                    {{
+                        "title": "Page title here",
+                        "url": "https://result-url.com"
+                    }},
+                    ...
+                ],
+                ...
+            }}
+            ```
+
+            Only return real results that appear in search. Skip queries with no results. Be concise and clean in output.
+            """
+        )
+
+        return dork_results
 
     def _domain_osint(self, context: dict) -> dict:
         """
