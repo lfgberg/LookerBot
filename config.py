@@ -120,20 +120,6 @@ def parse_arguments():
         default="config.yaml",
         type=str,
     )
-    parser.add_argument(
-        "-d",
-        "--domains",
-        dest="domains",
-        help="A comma seperated list of domain names for the target organization.",
-        type=str,
-    )
-    parser.add_argument(
-        "-k",
-        "--keywords",
-        dest="keywords",
-        help="A comma seperated list of keywords related to the target organization.",
-        type=str,
-    )
 
     args = parser.parse_args()
 
